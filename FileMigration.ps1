@@ -19,6 +19,29 @@ try {
     Write-Host "Error: $_" -ForegroundColor Red
     exit 1
 }
+function Get-RoboCount {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    # Use Robocopy's ultra-fast file enumeration
+    try {
+        $output = robocopy $Path NULL /L /S /NFL /NDL /NJH /NJS 2>$null
+        $countLine = ($output | Select-String "Files :").ToString()
+
+        if ($countLine) {
+            return [int]($countLine.Split(":")[1].Trim())
+        } else {
+            return 0
+        }
+    }
+    catch {
+        Write-Host "Fast count failed for: $Path" -ForegroundColor Yellow
+        return -1
+    }
+}
+
 
 Write-Host "=== Robocopy File Server Migration Script ===" -ForegroundColor Cyan
 Write-Host "Enter the pairs of Source and Destination paths to migrate." -ForegroundColor Yellow
@@ -138,11 +161,9 @@ foreach ($pair in $Pairs) {
 
     # Quick sample (PowerShell 5 compatible)
     try {
-        $sourceQuickCount = (
-            Get-ChildItem -Path $Source -Recurse -File -EA SilentlyContinue |
-            Where-Object { $_.FullName.Replace($Source, "").Trim('\').Split('\').Count -le 2 } |
-            Measure-Object
-        ).Count
+$sourceQuickCount = Get-RoboCount $Source
+Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -ForegroundColor Cyan
+
 
         Write-Host "Source contains at least ~ $sourceQuickCount files (sample)" -ForegroundColor Cyan
     } catch {
@@ -152,11 +173,9 @@ foreach ($pair in $Pairs) {
     # Destination checks
     if (Test-Path $Dest) {
         try {
-            $destQuickCount = (
-                Get-ChildItem -Path $Dest -Recurse -File -EA SilentlyContinue |
-                Where-Object { $_.FullName.Replace($Dest, "").Trim('\').Split('\').Count -le 2 } |
-                Measure-Object
-            ).Count
+$destQuickCount = Get-RoboCount $Dest
+Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" -ForegroundColor Cyan
+
 
             Write-Host "Destination contains at least ~ $destQuickCount files (sample)" -ForegroundColor Cyan
         } catch {}
