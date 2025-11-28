@@ -25,21 +25,30 @@ function Get-RoboCount {
         [string]$Path
     )
 
-    # Use Robocopy's ultra-fast file enumeration
-    try {
-        $output = robocopy $Path NULL /L /S /NFL /NDL /NJH /NJS 2>$null
-        $countLine = ($output | Select-String "Files :").ToString()
+    # Run robocopy in list mode and enable file names so we can stop early.
+    $process = Start-Process -FilePath "robocopy.exe" `
+        -ArgumentList "`"$Path`" NULL /L /S /NJH /NJS /NDL" `
+        -NoNewWindow -RedirectStandardOutput "pipe" -PassThru
 
-        if ($countLine) {
-            return [int]($countLine.Split(":")[1].Trim())
-        } else {
-            return 0
+    $count = 0
+
+    while (-not $process.HasExited) {
+        $line = $process.StandardOutput.ReadLine()
+
+        if ($line -match "^\s+\d+\s+(.+)$") {
+            # Robocopy file lines start with something like:
+            #    123456  file.txt
+            $count++
+
+            if ($count -ge 100) {
+                # We have enough, kill robocopy to stop scanning
+                try { $process.Kill() } catch {}
+                break
+            }
         }
     }
-    catch {
-        Write-Host "Fast count failed for: $Path" -ForegroundColor Yellow
-        return -1
-    }
+
+    return $count
 }
 
 
