@@ -69,7 +69,8 @@ $ExcludedFolders = @(
     ".svn",           # Exclude SVN repositories
     "node_modules",   # Exclude Node.js dependencies
     "$RECYCLE.BIN",   # Exclude recycle bin
-    "System Volume Information"  # Exclude system folders
+    "System Volume Information",  # Exclude system folders
+    "@Recycle"
 )
 # Add more folders as needed, e.g.:
 # $ExcludedFolders += "OldBackups"
