@@ -57,6 +57,25 @@ Write-Host "Enter the pairs of Source and Destination paths to migrate." -Foregr
 Write-Host "Type 'done' at Source prompt when finished." -ForegroundColor Yellow
 
 # ============================================================
+# EXCLUDED FOLDERS CONFIGURATION
+# ============================================================
+# Define folders to exclude from the copy (prevents recursive loops)
+# These will be passed to robocopy's /XD (exclude directory) flag
+$ExcludedFolders = @(
+    "Backup*",        # Excludes: Backup, Backup 1, Backup 2, Backup 2023, etc.
+    "*Backup*",       # Excludes any folder containing "Backup" in name
+    "latest",         # Excludes "latest" folders
+    ".git",           # Exclude Git repositories
+    ".svn",           # Exclude SVN repositories
+    "node_modules",   # Exclude Node.js dependencies
+    "$RECYCLE.BIN",   # Exclude recycle bin
+    "System Volume Information"  # Exclude system folders
+)
+# Add more folders as needed, e.g.:
+# $ExcludedFolders += "OldBackups"
+# $ExcludedFolders += "Archive*"
+
+# ============================================================
 # OPTION 1: Predefined pairs (edit as needed)
 # ============================================================
 if (-not (Get-Variable -Name Pairs -ErrorAction SilentlyContinue)) {
@@ -154,6 +173,20 @@ foreach ($pair in $Pairs) {
         continue
     }
 
+    # Check for suspiciously deep paths (recursive backup loop indicator)
+    $sourceDepth = ($Source -split '\\').Count
+    if ($sourceDepth -gt 15) {
+        Write-Host "⚠️  WARNING: Source path is suspiciously deep ($sourceDepth levels)!" -ForegroundColor Red
+        Write-Host "This might indicate a recursive backup loop." -ForegroundColor Red
+        Write-Host "Path: $Source" -ForegroundColor Yellow
+        $confirm = Read-Host "Continue anyway? (type 'YES' to confirm)"
+        if ($confirm -ne "YES") {
+            Write-Host "❌ Skipping this pair for safety." -ForegroundColor Yellow
+            $failureCount++
+            continue
+        }
+    }
+
     # Quick root-level check
     $sourceRootItems = @(Get-ChildItem -Path $Source -ErrorAction SilentlyContinue)
     $sourceRootCount = $sourceRootItems.Count
@@ -230,6 +263,14 @@ Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" 
         "/TEE",
         "/LOG:$LogFile"
     )
+    
+    # Add excluded directories if defined
+    if ($ExcludedFolders -and $ExcludedFolders.Count -gt 0) {
+        $RobocopyOptions += "/XD"
+        $RobocopyOptions += $ExcludedFolders
+        $RobocopyOptions += $Dest  # Always exclude destination to prevent nested copies
+        Write-Host "Excluding $($ExcludedFolders.Count) folder patterns..." -ForegroundColor Yellow
+    }
 
     Write-Host "Running Robocopy..." -ForegroundColor Cyan
 
