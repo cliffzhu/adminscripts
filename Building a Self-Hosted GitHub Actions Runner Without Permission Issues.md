@@ -1,184 +1,186 @@
 # Building a Self-Hosted GitHub Actions Runner Without Permission Issues
 
-Self-hosted GitHub Actions runners provide speed, control, and cost savings — until Docker enters the picture and starts breaking your builds with permission errors.
+Self-hosted GitHub Actions runners provide speed, control, and cost savings — but Docker-based actions can produce Linux file-permission failures when containers create root-owned files in the workspace.
 
-This guide shows how to build a **production-grade Linux self-hosted runner** that **never fails due to file permission issues**, even when using Docker-based actions such as **Azure Static Web Apps**.
+This guide shows how to build a production-grade Linux self-hosted runner that avoids file permission issues (even for Docker-based actions) without modifying your workflows.
 
-This setup is battle-tested and designed to work **without modifying workflows** in every repository.
+Table of contents
+- Prerequisites
+- The problem: why permission issues happen
+- Design goals
+- High-level solution
+- Architecture overview
+- Steps
+  - Step 1: Create a dedicated runner user
+  - Step 2: Install the GitHub Actions runner
+  - Step 3: Allow safe permission fixing
+  - Step 4: Create job hooks
+  - Step 5: Register hooks
+- Multiple runners on one host
+- Anti-patterns
+- Final result
 
 ---
 
-## The Problem: Why Permission Issues Happen
+Prerequisites
+- A Linux host with Docker installed (if you want to run Docker-based actions).
+- root or sudo access to configure users and systemd.
+- Decide on:
+  - RUNNER_USER (example: cliff)
+  - RUNNER_HOME (example: /home/cliff/actions-runner)
+  - RUNNER_NAME (the name you used when configuring the runner service)
+  - ORG/REPO and a registration TOKEN for the runner
 
-On Linux self-hosted runners:
+---
 
-- The GitHub runner service runs as a **non-root user**
-- Many GitHub Actions run **Docker containers**
-- Docker containers default to **UID 0 (root)**
-- Containers write files into the GitHub workspace
-- Those files become **root-owned**
-- On the next job, GitHub Actions attempts cleanup and fails
+The problem: why permission issues happen
+- The GitHub runner service runs as a non-root user.
+- Many GitHub Actions run inside Docker containers.
+- Containers often run as UID 0 (root).
+- Containers write files into the GitHub workspace.
+- Those files become root-owned on the host.
+- On the next job, the runner attempts cleanup and may fail with permission errors.
 
 This is expected Linux behavior — not a GitHub bug.
 
 ---
 
-## Design Goals
-
-1. Runner never runs as root  
-2. Docker is allowed safely  
-3. No workflow hacks  
-4. Crash-safe recovery  
-5. Scales to multiple runners per host  
-
----
-
-## High-Level Solution
-
-We use **GitHub Actions Runner Job Hooks**:
-
-- `job-started`: fixes leftovers from failed jobs
-- `job-completed`: fixes files created during the job
-
-Hooks run on the host and normalize file ownership automatically.
+Design goals
+1. Runner never runs as root.  
+2. Docker is allowed safely.  
+3. No workflow hacks or per-repo changes.  
+4. Crash-safe recovery.  
+5. Scales to multiple runners per host.  
 
 ---
 
-## Architecture Overview
+High-level solution
+Use GitHub Actions Runner Job Hooks:
+- job-started: fix leftovers from prior failed jobs.
+- job-completed: fix files created during the job.
 
-- Linux user: `cliff`
-- Runner installed as a systemd service
-- Docker enabled
-- Restricted passwordless `sudo chown`
-- Automatic workspace ownership repair
+Hooks run on the host and normalize file ownership automatically (chown back to the runner user).
 
 ---
 
-## Step 1: Create a Dedicated Runner User
+Architecture overview
+- Linux user: RUNNER_USER (example: cliff)  
+- Runner installed as a systemd service (installed via svc.sh)  
+- Docker enabled on the host  
+- Restricted, passwordless sudo allowed for chown (only what’s necessary)  
+- Hooks automatically repair workspace ownership
 
+---
+
+Steps
+
+Step 1: Create a dedicated runner user
+Replace RUNNER_USER with your chosen user.
 ```bash
+# example
 sudo useradd -m -s /bin/bash cliff
 sudo usermod -aG wheel,docker cliff
 su - cliff
 ```
 
----
-
-## Step 2: Install the GitHub Actions Runner
-
+Step 2: Install the GitHub Actions Runner
+Replace ORG/REPO and <TOKEN> with your organization/repo and registration token. Adjust runner version as needed.
 ```bash
-mkdir ~/actions-runner
-cd ~/actions-runner
+RUNNER_HOME="$HOME/actions-runner"
+mkdir -p "$RUNNER_HOME"
+cd "$RUNNER_HOME"
+
 curl -O -L https://github.com/actions/runner/releases/download/v2.331.0/actions-runner-linux-x64-2.331.0.tar.gz
 tar xzf actions-runner-linux-x64-2.331.0.tar.gz
+
+# configure (replace URL and token)
 ./config.sh --url https://github.com/ORG/REPO --token <TOKEN>
+
+# install and start the service (may require sudo)
 sudo ./svc.sh install
 sudo ./svc.sh start
 ```
 
----
-
-## Step 3: Allow Safe Permission Fixing
+Step 3: Allow safe permission fixing
+Create a sudoers drop-in that allows the runner user to run chown without a password. This example keeps the command general; if you want to lock it down further, restrict the allowed arguments or the path(s) under which chown may operate.
 
 ```bash
 sudo bash -c 'cat > /etc/sudoers.d/90-github-runner-perms << "EOF"
 cliff ALL=(root) NOPASSWD: /bin/chown
-EOF
-chmod 0440 /etc/sudoers.d/90-github-runner-perms
-visudo -cf /etc/sudoers.d/90-github-runner-perms
-```
----
-
-## Step 4: Create Job Hooks
-
-```bash
-mkdir -p ~/actions-runner/hooks
+EOF'
+sudo chmod 0440 /etc/sudoers.d/90-github-runner-perms
+sudo visudo -cf /etc/sudoers.d/90-github-runner-perms
 ```
 
-### job-started
+Notes:
+- Replace `cliff` with your RUNNER_USER.
+- For stricter security you can allow only a chown invocation that targets the runner workspace root(s).
+
+Step 4: Create job hooks
+Create a hooks directory under the runner home and add `job-started` and `job-completed` scripts. Use the runner user's UID:GID to restore ownership.
+
 ```bash
-cat > ~/actions-runner/hooks/job-started.sh <<'EOF'
+RUNNER_HOME="/home/cliff/actions-runner"
+mkdir -p "$RUNNER_HOME/hooks"
+```
+
+job-started (fix any leftovers before a job starts)
+```bash
+cat > "$RUNNER_HOME/hooks/job-started.sh" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+
 if [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
-  sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
+  # Restore ownership of the workspace to the runner user
+  sudo /bin/chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
 fi
 EOF
-chmod +x ~/actions-runner/hooks/job-started.sh
+chmod +x "$RUNNER_HOME/hooks/job-started.sh"
 ```
 
-### job-completed
+job-completed (fix files created during the job)
 ```bash
-cat > ~/actions-runner/hooks/job-completed.sh <<'EOF'
+cat > "$RUNNER_HOME/hooks/job-completed.sh" <<'EOF'
 #!/usr/bin/env bash
+set -euo pipefail
+
 if [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
-  sudo chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
+  sudo /bin/chown -R "$(id -u)":"$(id -g)" "$GITHUB_WORKSPACE" || true
 fi
 EOF
-chmod +x ~/actions-runner/hooks/job-completed.sh
+chmod +x "$RUNNER_HOME/hooks/job-completed.sh"
 ```
 
----
-
-## Step 5: Register Hooks
-
+Step 5: Register hooks
+Create or update the runner's `.env` to point to the hook scripts and restart the runner service. Replace paths and RUNNER_NAME as appropriate.
 ```bash
-cat > ~/actions-runner/.env <<'EOF'
-ACTIONS_RUNNER_HOOK_JOB_STARTED=/home/cliff/actions-runner/hooks/job-started.sh
-ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/home/cliff/actions-runner/hooks/job-completed.sh
+cat > "$RUNNER_HOME/.env" <<EOF
+ACTIONS_RUNNER_HOOK_JOB_STARTED=$RUNNER_HOME/hooks/job-started.sh
+ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$RUNNER_HOME/hooks/job-completed.sh
 EOF
+
+# restart the runner service (replace <RUNNER_NAME> with your runner service name)
 sudo systemctl restart actions.runner.<RUNNER_NAME>.service
 ```
 
 ---
 
-## Multiple Runners on One Host
-
-Recommended layout:
-
+Multiple runners on one host
+Recommended layout (per-runner directories):
 ```
-/home/cliff/actions-runner-repoA
-/home/cliff/actions-runner-repoB
-```
-
-Each runner has its own workspace and service.
-
----
-
-## Anti-Patterns
-
-- Running runners as root
-- Sharing runner directories
-- Blanket sudo permissions
-
----
-
-## Final Result
-
-- No permission-related CI failures
-- Docker-compatible
-- Secure and scalable
-- Zero workflow changes required
-
----
-Adapting This for Multiple Runners on One Host
-
-Running multiple runners on one machine is common and safe if done correctly.
-
-Recommended Layout
 /home/cliff/actions-runner-repoA
 /home/cliff/actions-runner-repoB
 /home/cliff/actions-runner-repoC
-
+```
 
 Each runner:
+- has its own _work directory and workspace,
+- runs as the same runner user (or a different user if you prefer),
+- has its own systemd service,
+- uses the same hook logic, but each .env should point to that runner’s hooks.
 
-has its own _work directory
-
-has its own systemd service
-
-uses the same hook logic, scoped to its workspace
-
-Installing an Additional Runner
+Installing another runner (example)
+```bash
 cd /home/cliff
 mkdir actions-runner-repoB
 cd actions-runner-repoB
@@ -189,37 +191,45 @@ tar xzf actions-runner-linux-x64-2.331.0.tar.gz
 ./config.sh --url https://github.com/ORG/REPO_B --token <TOKEN>
 sudo ./svc.sh install
 sudo ./svc.sh start
+```
 
-Reusing Hooks Across Runners
-
-Copy hooks into each runner directory:
-
+Copy hooks into each runner and create a per-runner `.env`:
+```bash
 for d in /home/cliff/actions-runner-*; do
   mkdir -p "$d/hooks"
   cp /home/cliff/actions-runner/hooks/*.sh "$d/hooks/"
   chmod +x "$d/hooks/"*.sh
-done
 
-
-Create a .env per runner:
-
-cat > /home/cliff/actions-runner-repoB/.env <<'EOF'
-ACTIONS_RUNNER_HOOK_JOB_STARTED=/home/cliff/actions-runner-repoB/hooks/job-started.sh
-ACTIONS_RUNNER_HOOK_JOB_COMPLETED=/home/cliff/actions-runner-repoB/hooks/job-completed.sh
+  cat > "$d/.env" <<EOF
+ACTIONS_RUNNER_HOOK_JOB_STARTED=$d/hooks/job-started.sh
+ACTIONS_RUNNER_HOOK_JOB_COMPLETED=$d/hooks/job-completed.sh
 EOF
+done
+```
 
-
-Restart the runner:
-
+Then restart each runner service:
+```bash
 sudo systemctl restart actions.runner.<REPO_B_RUNNER>.service
+```
 
-Why This Is Safe
+Why this is safe
+- GITHUB_WORKSPACE is runner-specific, so hooks only touch that workspace.
+- Hooks run on the host with the runner user's privileges (sudo only used for chown).
+- Docker side effects are neutralized automatically because hooks normalize ownership before/after jobs.
 
-Each runner has its own workspace
+---
 
-GITHUB_WORKSPACE is guaranteed to be runner-specific
+Anti-patterns
+- Running the runner as root.
+- Sharing runner directories between services.
+- Granting blanket sudo permissions beyond the minimum required.
+- Modifying workflows to try to handle root-owned files (this solution avoids that).
 
-Hooks only touch the active workspace
+---
 
-Docker side effects are neutralized automatically
-*End of document*
+Final result
+- No permission-related CI failures caused by Docker-created files.
+- Docker-compatible workflows continue to work without modification.
+- Secure, scalable setup that supports multiple runners on one host.
+
+End of document.
