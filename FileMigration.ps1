@@ -207,9 +207,6 @@ foreach ($pair in $Pairs) {
     try {
 $sourceQuickCount = Get-RoboCount $Source
 Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -ForegroundColor Cyan
-
-
-        Write-Host "Source contains at least ~ $sourceQuickCount files (sample)" -ForegroundColor Cyan
     } catch {
         Write-Host "Source quick count unavailable." -ForegroundColor Yellow
     }
