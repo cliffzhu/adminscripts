@@ -215,6 +215,7 @@ Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -Fo
 
     # Destination checks
     if (Test-Path $Dest) {
+        $destQuickCount = 0
         try {
 $destQuickCount = Get-RoboCount $Dest
 Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" -ForegroundColor Cyan
