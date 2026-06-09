@@ -203,6 +203,7 @@ foreach ($pair in $Pairs) {
     }
 
     # Quick sample (PowerShell 5 compatible)
+    $sourceQuickCount=0
     try {
 $sourceQuickCount = Get-RoboCount $Source
 Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -ForegroundColor Cyan
