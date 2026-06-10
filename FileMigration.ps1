@@ -252,7 +252,7 @@ Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" 
 
     # ROBOPY OPTIONS
     $RobocopyOptions = @(
-        "/MIR",
+        "/E",
         "/COPY:DAT",
         "/R:2",
         "/W:2",
