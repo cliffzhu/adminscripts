@@ -1,3 +1,24 @@
+<#
+.SYNOPSIS
+    Enumerates all user profiles on the Windows system and extracts their 
+    associated user principal names (UPNs) or email addresses.
+
+.DESCRIPTION
+    This script scans the Windows registry to list all local user profiles and 
+    classifies them by account type (Entra/AAD, local/domain, built-in services).
+    For regular user accounts, it loads the user's registry hive and searches for
+    email/UPN patterns in Microsoft Office, WebAccountManager, and OneDrive settings.
+    
+    Results are displayed in a formatted table showing SID, profile path, account type,
+    NT Account name, and the discovered UPN or email address. Useful for auditing
+    local system accounts and identifying which Entra ID or domain accounts have
+    profile data on the machine.
+
+.NOTES
+    Requires elevated (Administrator) privileges to load and unload registry hives.
+    Uses reg.exe to manage HKEY_USERS hive loading/unloading.
+    Searches are limited to 500 registry keys per root path for performance.
+#>
 $ErrorActionPreference = 'SilentlyContinue'
 
 function Get-ProfileList {
