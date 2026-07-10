@@ -1,3 +1,25 @@
+<#
+.SYNOPSIS
+    Audits and exports all permissions (delegated and application) granted to 
+    enterprise applications (service principals) in the Microsoft 365 tenant.
+
+.DESCRIPTION
+    This script connects to Microsoft Graph using the required scopes and retrieves:
+    - All service principals (enterprise apps) in the tenant
+    - Delegated permissions (OAuth2 grants) with consent type (admin or user)
+    - Application permissions (app role assignments)
+    
+    Results are exported to a CSV file with details on which apps have access to
+    which resources and the specific permissions granted, useful for security audits
+    and compliance reviews.
+
+.PARAMETER OutCsv
+    Path to the output CSV file. Defaults to '.\enterprise_app_permissions.csv'
+
+.NOTES
+    Requires Microsoft Graph PowerShell module (Connect-MgGraph)
+    Requires tenant admin or global reader role in Azure AD
+#>
 param(
   [string]$OutCsv = ".\enterprise_app_permissions.csv"
 )
