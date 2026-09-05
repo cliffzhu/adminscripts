@@ -6,6 +6,7 @@
     - Safety checks to avoid accidental deletion with /MIR
     - Logs written to %PUBLIC%\Logs
     - Multi-threaded Robocopy support
+    - Preserves NTFS security settings (ACLs/permissions)
 #>
 
 # Ensure log folder exists
@@ -205,8 +206,8 @@ foreach ($pair in $Pairs) {
     # Quick sample (PowerShell 5 compatible)
     $sourceQuickCount=0
     try {
-$sourceQuickCount = Get-RoboCount $Source
-Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -ForegroundColor Cyan
+        $sourceQuickCount = Get-RoboCount $Source
+        Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -ForegroundColor Cyan
     } catch {
         Write-Host "Source quick count unavailable." -ForegroundColor Yellow
     }
@@ -215,11 +216,8 @@ Write-Host "Source contains at least ~ $sourceQuickCount files (fast check)" -Fo
     if (Test-Path $Dest) {
         $destQuickCount = 0
         try {
-$destQuickCount = Get-RoboCount $Dest
-Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" -ForegroundColor Cyan
-
-
-            Write-Host "Destination contains at least ~ $destQuickCount files (sample)" -ForegroundColor Cyan
+            $destQuickCount = Get-RoboCount $Dest
+            Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" -ForegroundColor Cyan
         } catch {}
 
         if ($destQuickCount -gt 100 -and $sourceQuickCount -lt 10) {
@@ -250,10 +248,10 @@ Write-Host "Destination contains at least ~ $destQuickCount files (fast check)" 
     $safeSrc = ($Source -replace "[:\\\/]", "_")
     $LogFile = "$LogRoot\Robocopy_${safeSrc}_$timestamp.log"
 
-    # ROBOPY OPTIONS
+    # ROBOCOPY OPTIONS
     $RobocopyOptions = @(
         "/E",
-        "/COPY:DAT",
+        "/COPY:DATS",     # D=Data, A=Attributes, T=Timestamps, S=Security (NTFS ACLs/permissions)
         "/R:2",
         "/W:2",
         "/MT:16",
