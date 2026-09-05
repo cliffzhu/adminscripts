@@ -7,6 +7,7 @@
     - Logs written to %PUBLIC%\Logs
     - Multi-threaded Robocopy support
     - Preserves NTFS security settings (ACLs/permissions)
+    - Copies parent folder permissions (applies to top-level folder)
 #>
 
 # Ensure log folder exists
@@ -279,6 +280,16 @@ foreach ($pair in $Pairs) {
         Write-Host "Robocopy execution failed: $_" -ForegroundColor Red
         $failureCount++
         continue
+    }
+
+    # Copy parent folder permissions (robocopy doesn't do this automatically)
+    Write-Host "Copying parent folder permissions..." -ForegroundColor Cyan
+    try {
+        $srcAcl = Get-Acl -Path $Source
+        Set-Acl -Path $Dest -AclObject $srcAcl -ErrorAction Stop
+        Write-Host "Parent folder permissions applied successfully." -ForegroundColor Green
+    } catch {
+        Write-Host "Warning: Could not copy parent folder permissions: $_" -ForegroundColor Yellow
     }
 
     # Exit code analysis
