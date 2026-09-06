@@ -83,7 +83,7 @@ $ExcludedFolders = @(
 # ============================================================
 if (-not (Get-Variable -Name Pairs -ErrorAction SilentlyContinue)) {
     $Pairs = @(
-        @{
+        @{ 
             Source      = "c:\it"
             Destination = "c:\Temp\It"
         }
@@ -234,9 +234,11 @@ foreach ($pair in $Pairs) {
     Write-Host "Safety checks passed." -ForegroundColor Green
 
     # Create destination folder if needed
+    $createdDest = $false
     if (!(Test-Path $Dest)) {
         try {
             New-Item -ItemType Directory -Path $Dest -Force -EA Stop | Out-Null
+            $createdDest = $true
         } catch {
             Write-Host "Failed to create destination: $Dest" -ForegroundColor Red
             $failureCount++
@@ -247,17 +249,21 @@ foreach ($pair in $Pairs) {
     # OPTION 3: Copy parent folder permissions BEFORE robocopy
     # This avoids touching the destination folder's metadata during/after the copy
     Write-Host "Applying parent folder permissions to destination..." -ForegroundColor Cyan
-    try {
-        $srcAcl = Get-Acl -Path $Source
-        Set-Acl -Path $Dest -AclObject $srcAcl -ErrorAction Stop
-        Write-Host "Parent folder permissions applied successfully." -ForegroundColor Green
-    } catch {
-        Write-Host "Warning: Could not copy parent folder permissions: $_" -ForegroundColor Yellow
+    if ($createdDest) {
+        try {
+            $srcAcl = Get-Acl -Path $Source
+            Set-Acl -Path $Dest -AclObject $srcAcl -ErrorAction Stop
+            Write-Host "Parent folder permissions applied successfully." -ForegroundColor Green
+        } catch {
+            Write-Host "Warning: Could not copy parent folder permissions: $_" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Destination already exists — skipping Set-Acl to avoid overwriting existing permissions." -ForegroundColor Yellow
     }
 
     # LOG FILE
     $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
-    $safeSrc = ($Source -replace "[:\\\/]", "_")
+    $safeSrc = ($Source -replace ":\\\\\/", "_")
     $LogFile = "$LogRoot\Robocopy_${safeSrc}_$timestamp.log"
 
     # ROBOCOPY OPTIONS
