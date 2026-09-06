@@ -244,6 +244,17 @@ foreach ($pair in $Pairs) {
         }
     }
 
+    # OPTION 3: Copy parent folder permissions BEFORE robocopy
+    # This avoids touching the destination folder's metadata during/after the copy
+    Write-Host "Applying parent folder permissions to destination..." -ForegroundColor Cyan
+    try {
+        $srcAcl = Get-Acl -Path $Source
+        Set-Acl -Path $Dest -AclObject $srcAcl -ErrorAction Stop
+        Write-Host "Parent folder permissions applied successfully." -ForegroundColor Green
+    } catch {
+        Write-Host "Warning: Could not copy parent folder permissions: $_" -ForegroundColor Yellow
+    }
+
     # LOG FILE
     $timestamp = (Get-Date).ToString("yyyyMMdd_HHmmss")
     $safeSrc = ($Source -replace "[:\\\/]", "_")
@@ -260,6 +271,7 @@ foreach ($pair in $Pairs) {
         "/FFT",
         "/V",
         "/TEE",
+        "/XO",            # OPTION 1: Exclude older files (skip if destination file is newer)
         "/LOG:$LogFile"
     )
     
@@ -280,16 +292,6 @@ foreach ($pair in $Pairs) {
         Write-Host "Robocopy execution failed: $_" -ForegroundColor Red
         $failureCount++
         continue
-    }
-
-    # Copy parent folder permissions (robocopy doesn't do this automatically)
-    Write-Host "Copying parent folder permissions..." -ForegroundColor Cyan
-    try {
-        $srcAcl = Get-Acl -Path $Source
-        Set-Acl -Path $Dest -AclObject $srcAcl -ErrorAction Stop
-        Write-Host "Parent folder permissions applied successfully." -ForegroundColor Green
-    } catch {
-        Write-Host "Warning: Could not copy parent folder permissions: $_" -ForegroundColor Yellow
     }
 
     # Exit code analysis
